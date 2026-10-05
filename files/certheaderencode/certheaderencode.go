@@ -8,12 +8,23 @@
 // decoding turns every '+' of the base64 into a space and the certificate is
 // rejected with "Illegal base64 character 20". Encoding the value here gives
 // core exactly what its decoding step expects.
+//
+// When the client presents more than its leaf certificate (e.g. leaf plus an
+// intermediate), passTLSClientCert joins each certificate's base64 with a
+// literal ',' instead of returning just the leaf -- see
+// https://github.com/traefik/traefik/issues/13940. The fix for that upstream
+// (onlyLeaf) isn't released yet, so we work around it here: core's
+// URL-decode-then-base64-decode step has no notion of multiple certificates,
+// and $ssl_client_escaped_cert never exposed anything but the leaf either, so
+// keeping only the first certificate restores that behavior. Base64 never
+// contains a comma, so splitting on the first one is unambiguous.
 package certheaderencode
 
 import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // DefaultHeader is the header passTLSClientCert writes the certificate to.
@@ -48,6 +59,9 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 
 func (e *encoder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if value := req.Header.Get(e.header); value != "" {
+		if leaf, _, found := strings.Cut(value, ","); found {
+			value = leaf
+		}
 		req.Header.Set(e.header, url.QueryEscape(value))
 	}
 
